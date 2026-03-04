@@ -2134,3 +2134,34 @@ You now have enterprise-grade HITL:
 Tool → approval workflow → role-based → multi-level → audited → executed
 
 Fully configurable via YAML.
+
+
+Task: Replace SQLite with PostgreSQL in ADK + FastAPI Agent System
+Context
+
+We have an agent system built using:
+
+Google ADK agents
+
+FastAPI backend
+
+MCP tools (Python)
+
+AG-UI integration
+
+ADK DatabaseSessionService currently using SQLite
+
+The SQLite database is only used for session persistence.
+We want to replace SQLite with PostgreSQL.
+
+Important constraints:
+
+No data migration required
+
+Fresh PostgreSQL schema creation is fine
+
+System should support concurrent sessions
+
+All DB interactions should be async
+
+Use connection pooling
