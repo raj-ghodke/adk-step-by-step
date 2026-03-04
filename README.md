@@ -2165,3 +2165,100 @@ System should support concurrent sessions
 All DB interactions should be async
 
 Use connection pooling
+
+Replace SQLite usage with PostgreSQL while ensuring:
+
+Async database operations
+
+Connection pooling
+
+Compatibility with DatabaseSessionService
+
+Minimal changes to the rest of the agent code
+
+Production-safe configuration
+
+Implementation Requirements
+1. PostgreSQL Driver
+
+Use:
+
+asyncpg
+or
+
+SQLAlchemy async engine
+
+Preferred stack:
+
+SQLAlchemy (async)
+asyncpg driver
+2. Database Connection Pool
+
+Implement pooled async connection using:
+
+create_async_engine(
+    "postgresql+asyncpg://user:password@host:port/dbname",
+    pool_size=10,
+    max_overflow=20,
+    pool_timeout=30,
+    pool_recycle=1800
+)
+
+Provide environment-variable configuration for:
+
+DB_HOST
+DB_PORT
+DB_USER
+DB_PASSWORD
+DB_NAME
+3. Session Service Update
+
+Modify the existing initialization of:
+
+DatabaseSessionService
+
+Replace SQLite configuration with PostgreSQL-backed implementation.
+
+If the current code uses something like:
+
+sqlite:///sessions.db
+
+Replace with:
+
+postgresql+asyncpg://...
+
+Ensure the session store still supports:
+
+session creation
+
+session retrieval
+
+session updates
+
+message history persistence
+
+4. Async Safety
+
+Ensure all database interactions are async:
+
+Use:
+
+async with session.begin():
+
+Avoid any synchronous database calls.
+
+5. FastAPI Lifecycle Integration
+
+Initialize DB connection pool during FastAPI startup event.
+
+Example pattern:
+
+@app.on_event("startup")
+async def startup():
+    init_db_pool()
+
+Ensure proper shutdown:
+
+@app.on_event("shutdown")
+async def shutdown():
+    close_db_pool()
