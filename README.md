@@ -228,3 +228,14 @@ Do not instantiate Google ADK agents.
 Only store the YAML specification.
 
 The goal of Phase-1 is a minimal but production-quality onboarding API with test coverage.
+
+
+Additional Requirement: Database Table Creation Script
+
+Since this is Phase-1 of the platform, we do not want to introduce migrations yet.
+
+Instead, generate a SQL script that creates the required tables.
+
+Create a file:
+
+db/schema.sql
