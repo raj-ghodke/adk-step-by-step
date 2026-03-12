@@ -239,3 +239,223 @@ Instead, generate a SQL script that creates the required tables.
 Create a file:
 
 db/schema.sql
+
+
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+Task: Implement Phase-1 Agent Invocation API with DatabaseSessionService Support
+
+Context
+
+We are building an internal agent platform that allows teams to onboard and invoke AI agents. The backend is built using FastAPI and PostgreSQL. Agent definitions are stored as YAML in the database.
+
+We already implemented the onboarding API which stores agent YAML definitions in the database.
+
+Now we want to implement a simple agent invocation endpoint.
+
+Our platform already has a common component called LLMAgent which wraps the Google ADK agent and creates agents based on configuration. Currently LLMAgent uses InMemorySessionService. We want to extend this component to support DatabaseSessionService so that agent sessions can be persisted in the database.
+
+Phase-1 goal is to keep the implementation simple.
+
+Requirements
+
+1. Implement a new API endpoint to invoke an agent.
+
+Endpoint
+
+POST /agents/invoke
+
+Request Example
+
+{
+"agent_name": "customer-support-agent",
+"version": "1.0.0",
+"input": "My payment failed",
+"session_id": "abc123",
+"params": {}
+}
+
+Fields
+
+agent_name: name of the agent
+version: agent version to execute
+input: user input to the agent
+session_id: session identifier
+params: optional runtime parameters
+
+Response Example
+
+{
+"response": "I'm sorry to hear your payment failed. Let me help you troubleshoot."
+}
+
+High-Level Flow
+
+API receives invoke request
+↓
+Load agent YAML definition from database using agent_name and version
+↓
+Convert YAML to Python dictionary
+↓
+Use LLMAgent to construct the ADK agent instance
+↓
+Use DatabaseSessionService instead of InMemorySessionService
+↓
+Execute the agent with the input
+↓
+Return agent response
+
+Database Lookup
+
+Use existing AgentRegistry to fetch agent version.
+
+Method
+
+get_version(agent_name, version)
+
+The YAML definition stored in the database should be parsed using PyYAML.
+
+LLMAgent Update
+
+The existing LLMAgent component currently uses InMemorySessionService.
+
+Extend LLMAgent so that it can optionally accept a session service.
+
+Current behavior
+
+LLMAgent(config)
+
+New behavior
+
+LLMAgent(config, session_service=None)
+
+If session_service is provided, use it when creating the ADK agent.
+
+If not provided, fallback to InMemorySessionService.
+
+Example
+
+session_service = DatabaseSessionService(...)
+
+agent = LLMAgent(
+config=agent_config,
+session_service=session_service
+)
+
+Session Service
+
+Use DatabaseSessionService provided by Google ADK.
+
+The session service should be initialized once and reused.
+
+Example
+
+session_service = DatabaseSessionService(db_connection)
+
+Project Structure
+
+backend/
+server/
+api/
+agents_api.py
+invoke_api.py
+models/
+agent_models.py
+
+registry/
+agent_registry.py
+
+runtime/
+agent_executor.py
+
+db/
+postgres.py
+
+tests/
+test_invoke_api.py
+
+Implementation Steps
+
+1. Create request/response models
+
+server/models/agent_models.py
+
+InvokeAgentRequest
+InvokeAgentResponse
+
+2. Implement invoke endpoint
+
+server/api/invoke_api.py
+
+POST /agents/invoke
+
+Responsibilities
+
+* fetch agent spec from DB
+* parse YAML
+* construct LLMAgent
+* run agent
+
+3. Extend LLMAgent
+
+Add support for optional session_service parameter.
+
+If provided, pass it to the underlying ADK agent.
+
+If not provided, default to InMemorySessionService.
+
+4. Implement agent execution helper
+
+runtime/agent_executor.py
+
+Responsibilities
+
+* construct LLMAgent
+* run agent
+* return result
+
+Testing Requirements
+
+Create API tests using pytest.
+
+tests/test_invoke_api.py
+
+Test cases
+
+* invoke agent successfully
+* response contains agent output
+* correct agent version loaded
+* session_id passed correctly
+
+Mock LLMAgent execution to avoid calling real LLMs.
+
+Example
+
+mock_llm_agent.run → return fixed response.
+
+Dependencies
+
+fastapi
+sqlalchemy[asyncio]
+asyncpg
+pyyaml
+pytest
+pytest-asyncio
+httpx
+google-adk
+
+Notes
+
+Keep the implementation simple.
+
+Do not implement caching in this phase.
+
+Do not implement agent lifecycle management yet.
+
+Focus only on:
+
+* loading agent definition
+* constructing LLMAgent
+* executing the agent
+* returning the response.
+
