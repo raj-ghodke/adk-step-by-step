@@ -459,3 +459,61 @@ Focus only on:
 * executing the agent
 * returning the response.
 
+If session exists → continue conversation
+If not → new conversation
+
+Request Example (New Session)
+{
+  "agent_name": "customer-support-agent",
+  "version": "1.0.0",
+  "caller_system": "payments-service",
+  "input": "My payment failed"
+}
+Server Logic
+
+Flow:
+
+request received
+     │
+check session_id
+     │
+if missing
+     │
+generate new session_id
+     │
+load agent spec
+     │
+create LLMAgent
+     │
+execute agent
+     │
+return response + session_id
+Response
+{
+  "session_id": "generated-session-id",
+  "response": "I'm sorry your payment failed. Let me help you troubleshoot."
+}
+
+Now the client can reuse the session:
+
+{
+  "session_id": "generated-session-id",
+  "input": "It says insufficient funds"
+}
+Pydantic Request Model
+from pydantic import BaseModel
+from typing import Optional, Dict, Any
+
+
+class InvokeAgentRequest(BaseModel):
+    agent_name: str
+    version: str
+    caller_system: str
+    input: str
+    session_id: Optional[str] = None
+    params: Optional[Dict[str, Any]] = None
+    metadata: Optional[Dict[str, Any]] = None
+Response Model
+class InvokeAgentResponse(BaseModel):
+    session_id: str
+    response: str
