@@ -517,3 +517,60 @@ Response Model
 class InvokeAgentResponse(BaseModel):
     session_id: str
     response: str
+
+
+
+
+
+--------------------------------------------------------------------------------------------------------------------------------------------
+
+Task: Implement Session Events API
+
+Create an endpoint to return full session interaction history including messages and tool calls.
+
+Endpoint
+
+GET /sessions/{session_id}/events
+
+Behavior
+
+* Fetch session using DatabaseSessionService
+* Transform session data into a list of events
+* Each event should include:
+
+  * type (message | tool_call | tool_result)
+  * relevant fields (role, content, tool_name, arguments, result)
+  * timestamp
+
+Response Format
+
+{
+"session_id": "string",
+"events": []
+}
+
+Event Types
+
+message:
+role: user | assistant
+content: string
+
+tool_call:
+tool_name: string
+arguments: object
+
+tool_result:
+tool_name: string
+result: string
+
+Project Location
+
+server/api/sessions_api.py
+
+Add mapping logic in runtime/session_mapper.py
+
+Testing
+
+* verify messages are returned
+* verify tool calls are included
+* verify correct ordering
