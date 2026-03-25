@@ -574,3 +574,281 @@ Testing
 * verify messages are returned
 * verify tool calls are included
 * verify correct ordering
+
+
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+## Context
+
+We are building an **agent onboarding/execution platform** using:
+
+* FastAPI (backend)
+* Google ADK (agent runtime)
+* PostgreSQL (database)
+* AG-UI (chat interface)
+
+Currently implemented endpoints:
+
+* `/onboard`
+* `/agents/{agent_name}/versions/{version}/runs` (invoke)
+* `/sessions/{session_id}/events`
+
+---
+
+## Goal
+
+Enhance the system to:
+
+1. Support **business-driven inputs using `case_id`**
+2. Maintain a **persistent mapping between `case_id` and `session_id`**
+3. Handle **natural language inputs** like:
+   * "investigate MOCK-CASE-001"
+4. Ensure **session reuse for same case**
+5. Keep the system **generic and reusable across agents**
+
+---
+
+## Requirements
+
+---
+
+1. Database Layer
+
+Create a new table:
+
+```sql
+CREATE TABLE case_sessions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    case_id VARCHAR(100) NOT NULL,
+    agent_name VARCHAR(100) NOT NULL,
+    session_id VARCHAR(255) NOT NULL,
+    status VARCHAR(50) DEFAULT 'ACTIVE',
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW(),
+    UNIQUE (case_id, agent_name)
+);
+```
+
+---
+
+2. SQLAlchemy Model
+
+* Create `CaseSession` model
+* Use async SQLAlchemy setup
+* Include indexes where necessary
+
+---
+
+3. Service Layer
+
+Create `CaseSessionService` with:
+
+#### Method:
+
+```python
+async def get_or_create_session(
+    db,
+    case_id: str,
+    agent_name: str,
+    create_session_fn
+) -> str
+```
+
+#### Behavior:
+
+* Check if `(case_id, agent_name)` exists
+* If yes → return existing `session_id`
+* If no → call `create_session_fn()`
+* Persist mapping
+* Return `session_id`
+
+---
+
+4. Natural Language Pre-Processor
+
+Create utility:
+
+```python
+def extract_case_id(text: str) -> Optional[str]
+```
+
+#### Requirements:
+
+* Use regex: `case\s+([A-Z0-9\-]+)`
+* Case insensitive
+* Return `None` if not found
+
+---
+
+5. Input Normalization
+
+Create function:
+
+```python
+def normalize_input(raw_input: str, case_id: str) -> str
+```
+
+#### Behavior:
+
+* Remove `case {case_id}` from input
+* Trim whitespace
+* Fallback to `"investigate case"` if empty
+
+---
+
+6. Update Invoke Endpoint
+
+Modify:
+
+```
+POST /agents/{agent_name}/versions/{version}/runs
+```
+
+#### New Behavior:
+
+1. Accept raw input string
+2. Extract `case_id`
+3. If not found → return 400 error
+4. Normalize input
+5. Resolve session via `CaseSessionService`
+6. Invoke agent with:
+
+   * `session_id`
+   * cleaned input
+   * context `{ case_id }`
+
+---
+
+7. Agent Invocation
+
+Ensure:
+
+```python
+agent_runner.run(
+    session_id=session_id,
+    input=cleaned_input,
+    context={"case_id": case_id}
+)
+```
+
+---
+
+8. Backward Compatibility
+
+* If request already has `case_id`, skip extraction
+* Support both:
+
+  * structured input
+  * natural language input
+
+---
+
+9. Error Handling
+
+* Invalid/missing `case_id` → clear error message
+* DB failures → proper logging
+* Session creation failure → retry or fail gracefully
+
+---
+
+10. Logging
+
+Add logs for:
+
+* case_id extraction
+* session resolution (new vs reused)
+* agent invocation
+
+---
+
+## Constraints
+
+* Do NOT modify existing session service in ADK
+* Keep logic modular (service + utils)
+* Follow async patterns
+* Ensure thread-safe DB operations
+
+---
+
+## Test Cases
+
+### Case 1: New Case
+
+Input:
+
+```
+"investigate case CASE123"
+```
+
+Expected:
+
+* New session created
+* Mapping stored
+
+---
+
+### Case 2: Existing Case
+
+Input:
+
+```
+"check status of case CASE123"
+```
+
+Expected:
+
+* Same session reused
+
+---
+
+### Case 3: Missing Case ID
+
+Input:
+
+```
+"investigate this issue"
+```
+
+Expected:
+
+* 400 error
+
+---
+
+### Case 4: Structured Input
+
+```json
+{
+  "case_id": "CASE999",
+  "input": "investigate"
+}
+```
+
+Expected:
+
+* Skip extraction
+* Use provided case_id
+
+---
+
+## Deliverables
+
+* SQL migration
+* SQLAlchemy model
+* Service layer
+* Utility functions
+* Updated endpoint
+* Unit tests
+
+---
+
+## Success Criteria
+
+* Same `case_id` always maps to same session
+* Natural language inputs work seamlessly
+* No breaking changes to existing APIs
+* Clean, modular, production-ready code
+
+---
+
+**Focus on clean architecture, readability, and extensibility.**
