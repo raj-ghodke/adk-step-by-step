@@ -869,3 +869,5 @@ You are responsible for analyzing and resolving payment-related cases.
 - Use tools when deeper data is required
 - Be precise and structured in responses
 - If data is missing, explicitly mention it
+
+One more questions there will be many mcp tools. There could be possibility that the team who defines the agent, they might have their own mcp tools in that case how can platform tests the mcp tools what strategy could be their to test the mcp tools owned by other teams
