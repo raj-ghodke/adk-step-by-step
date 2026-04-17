@@ -284,3 +284,22 @@ The proposed architecture establishes a clear separation:
 | S3 (team-owned) | Full session and event data |
 
 This approach ensures compliance, scalability, and platform independence while enabling teams to retain ownership of their data.
+
+
+API (/invoke)
+   ↓
+Agent Executor
+   ↓
+Load agent config
+   ↓
+Create agent
+   ↓
+Create InMemorySessionService ✅
+   ↓
+Run agent
+   ↓
+Capture events (platform layer)
+   ↓
+Write full session/events → S3
+   ↓
+Store metadata → correlation_sessions (Postgres)
