@@ -1,297 +1,286 @@
-
-**This design ensures scalability, traceability, and clean separation between business and conversational layers.**
-
-
-# Agent Platform – Storage and Timeline Architecture Strategy
+# Agent Platform – Storage and Session Management Strategy (S3-Based Model)
 
 ## 1. Purpose
 
-This document defines the target-state architecture for storage and timeline rendering within the Agent Platform built using Google ADK.
+This document defines the revised storage and session management strategy for the Agent Platform built using Google ADK.
 
 The objective is to:
 
-* Improve performance and scalability
-* Decouple platform dependencies from ADK internal storage
-* Enable a consistent, reusable, and audit-compliant timeline model across use cases
+* Avoid storing business data within the platform (compliance requirement)
+* Delegate full session and event storage to agent-owning teams
+* Maintain platform ownership of execution metadata only
+* Establish a scalable and decoupled architecture for multi-tenant usage
 
 ---
 
-## 2. Current State
+## 2. Design Principles
 
-### 2.1 Data Model
+* Google ADK is used strictly as an **execution engine**
+* Platform does **not own business or session payload data**
+* All session and event data is stored in **team-owned S3 buckets**
+* Platform maintains only **metadata required for orchestration and UI**
+* UI interacts with S3 **only via platform APIs**
 
-The current implementation relies on:
+---
 
-* **ADK-managed tables**
+## 3. Current State (For Reference)
+
+### Data Storage
+
+* ADK tables:
 
   * sessions
   * events
+* Platform table:
 
-* **Platform-managed tables**
+  * correlation_sessions (correlation_id → session_id)
 
-  * correlation_sessions
-    (maps investigation_id / correlation_id → session_id)
+### UI Behavior
 
----
+* List view:
 
-### 2.2 UI Interaction Model
+  * correlation_sessions + sessions
+* Detail view:
 
-#### Session Summary View
+  * events table queried using session_id
 
-* UI retrieves:
+### Limitations
 
-  * correlation_sessions
-  * sessions
-* Displays:
-
-  * List of sessions associated with an investigation (correlation_id)
-
----
-
-#### Timeline View
-
-* On user selection:
-
-  * System queries events table using session_id
-* Displays:
-
-  * Full execution timeline derived directly from ADK events
+* Tight coupling with ADK schema
+* Large payloads stored in PostgreSQL
+* Compliance concerns (platform storing business data)
+* Limited scalability for multi-tenant usage
 
 ---
 
-### 2.3 Key Limitations
+## 4. Target State Architecture
 
-1. **Performance Constraints**
-
-   * Events table contains large payloads
-   * Query latency increases with data volume
-
-2. **Storage Inefficiency**
-
-   * Full payloads (tool outputs, LLM responses) stored in PostgreSQL
-
-3. **Tight Coupling**
-
-   * UI and platform logic directly dependent on ADK schema
-
-4. **Scalability Risks**
-
-   * Multi-tenant adoption will significantly increase load and storage footprint
-
----
-
-## 3. Target State Architecture
-
-### 3.1 Design Principles
-
-* ADK will be treated as an **execution engine only**
-* Platform will maintain its own **derived, query-optimized data model**
-* Heavy payloads will be externalized to object storage
-* UI will consume only platform-managed data structures
-
----
-
-## 4. Proposed Data Model
-
-### 4.1 Investigation Timeline Table
-
-A new table will be introduced:
-
-`investigation_timeline`
-
-#### Purpose:
-
-* Provide a lightweight, query-efficient representation of execution events
-* Serve as the primary data source for UI timeline rendering
-
----
-
-### 4.2 Schema Definition
-
-```sql
-CREATE TABLE investigation_timeline (
-    id BIGSERIAL PRIMARY KEY,
-    tenant_id VARCHAR(50),
-    investigation_id VARCHAR(100),
-    session_id VARCHAR(100),
-
-    event_id VARCHAR(100),
-
-    event_type VARCHAR(50),
-    event_subtype VARCHAR(50),
-    status VARCHAR(20),
-
-    summary TEXT,
-    s3_payload_path TEXT,
-
-    created_at TIMESTAMP DEFAULT NOW()
-);
-```
-
----
-
-## 5. Data Flow Architecture
-
-### 5.1 Processing Flow
-
-ADK events will not be consumed directly by UI.
-
-Instead, a transformation layer will be introduced:
+### 4.1 High-Level Overview
 
 ```plaintext
-ADK (sessions, events)
-        ↓
-Timeline Processor
-        ↓
-PostgreSQL (investigation_timeline)
-        ↓
-S3 (payload storage)
+UI → Platform API → PostgreSQL (metadata)
+                  → S3 (team-owned, full session data)
+                  → ADK (execution engine only)
 ```
 
 ---
 
-### 5.2 Payload Management
+## 5. Session Storage Strategy
 
-* Large payloads (tool outputs, detailed logs) will be stored in S3
-* PostgreSQL will store:
+### 5.1 Custom Session Service
 
-  * summary
-  * metadata
-  * S3 reference path
+Replace ADK `DatabaseSessionService` with:
 
----
+## **Custom S3SessionService (Wrapper over InMemorySessionService)**
 
-## 6. UI Interaction Model (Target State)
+### Responsibilities:
 
-### 6.1 Session Summary View
-
-No immediate change:
-
-* Continue using correlation_sessions + sessions
+* Use in-memory session handling during execution
+* Persist final session and event data to S3
+* Avoid persistence in ADK database tables
 
 ---
 
-### 6.2 Timeline View
+### 5.2 Execution Flow
 
-Replace direct dependency on events table:
-
-* UI will query:
-
-  * investigation_timeline
-
-This ensures:
-
-* Reduced latency
-* Consistent structure across agents
-
----
-
-### 6.3 Detailed Payload Access
-
-* Full payloads will be retrieved on demand from S3
-* Avoids loading large data during timeline rendering
+```plaintext
+1. Platform creates execution (correlation_id)
+2. ADK agent is invoked using InMemorySessionService
+3. Events are generated in-memory during execution
+4. On completion:
+    - Full session + events serialized
+    - Stored in team-owned S3
+5. Platform updates metadata in PostgreSQL
+```
 
 ---
 
-## 7. ADK Data Retention Strategy
+## 6. S3 Storage Model (Team-Owned)
 
-ADK tables will be treated as transient operational storage.
+### 6.1 Standard Path Structure
 
-### Retention Policy
-
-| Table    | Retention Period |
-| -------- | ---------------- |
-| sessions | 7–14 days        |
-| events   | 7–30 days        |
-
----
-
-### Cleanup Approach
-
-* Scheduled batch deletion or partition-based cleanup
-* Ensures controlled database growth
+```plaintext
+s3://<team-bucket>/
+  <execution_id>/
+    session.json
+    events.json
+```
 
 ---
 
-## 8. Implementation Strategy
+### 6.2 Storage Format
 
-### Phase 1
+* Format aligns with ADK session/event structure
+* Platform does not enforce transformation at storage level
+* Format versioning is recommended:
 
-* Introduce investigation_timeline table
-
-### Phase 2
-
-* Implement timeline processor (polling-based)
-
-### Phase 3
-
-* Backfill historical data
-
-### Phase 4
-
-* Migrate UI to timeline table
-
-### Phase 5
-
-* Introduce S3 payload offloading
-
-### Phase 6
-
-* Enable ADK table cleanup
+```json
+{
+  "format": "adk_v1",
+  "session": {...},
+  "events": [...]
+}
+```
 
 ---
 
-## 9. Benefits
+### 6.3 Ownership Model
 
-* Improved query performance and UI responsiveness
-* Reduced database storage footprint
-* Decoupling from ADK internal schema
-* Scalable multi-tenant architecture
-* Enhanced audit and observability capabilities
-
----
-
-## 10. Architectural Decision: Event Processing Mechanism
-
-### Options Evaluated
-
-#### Option 1: Inline Hooks (Synchronous Processing)
-
-* Transform events during agent execution
-
-#### Option 2: Background Timeline Processor (Asynchronous Polling)
+| Data Type       | Owner             |
+| --------------- | ----------------- |
+| Session payload | Agent-owning team |
+| Event payload   | Agent-owning team |
+| Metadata        | Platform          |
 
 ---
 
-### Recommended Approach: Background Timeline Processor
+## 7. Platform Metadata (PostgreSQL)
 
-#### Rationale
+### 7.1 correlation_sessions Table
 
-* **Loose coupling from ADK internals**
-* **Lower operational risk**
-* **No impact on agent execution latency**
-* **Easier rollout and rollback**
-* **Supports reprocessing and backfill**
+This remains the primary platform table.
 
 ---
 
-### When to Consider Hooks (Future State)
+### 7.2 Updated Schema
 
-* Real-time streaming UI is required
-* Strong consistency is mandatory
-* Event latency must be near-zero
+```sql
+correlation_id (PK)
+session_id
+
+agent_name
+agent_version
+
+status
+status_reason
+
+start_time
+end_time
+
+s3_bucket
+s3_prefix
+
+additional_metadata (JSONB)
+created_at
+```
 
 ---
 
-## 11. Conclusion
+### 7.3 Purpose
 
-The proposed architecture introduces a clear separation between:
+* Drive UI list view
+* Provide execution status
+* Store pointer to S3 location
+* Enable filtering and analytics
 
-| Layer      | Responsibility                              |
-| ---------- | ------------------------------------------- |
-| ADK        | Execution (transient)                       |
-| PostgreSQL | Queryable timeline (source of truth for UI) |
-| S3         | Payload and archival storage                |
+---
 
-This approach ensures scalability, maintainability, and alignment with enterprise-grade platform standards.
+## 8. UI Interaction Model
 
+### 8.1 List View
+
+Data Source: PostgreSQL
+
+Displays:
+
+* correlation_id (execution_id)
+* status
+* status_reason
+* timestamps
+* agent metadata
+
+---
+
+### 8.2 Detail View
+
+Data Source: S3 (via Platform API)
+
+Flow:
+
+```plaintext
+UI → Platform API → S3 → Response to UI
+```
+
+---
+
+### 8.3 Key Constraint
+
+* UI must **not directly access S3**
+* All access must go through platform APIs
+
+---
+
+## 9. Platform API Responsibilities
+
+* Resolve S3 location using metadata
+* Fetch session/event data from S3
+* Perform optional transformation if required
+* Enforce access control and security
+
+---
+
+## 10. Security and Access Model
+
+* Team-owned S3 buckets
+* Platform uses:
+
+  * Cross-account IAM roles OR
+  * Scoped access credentials
+* Access validated during onboarding
+
+---
+
+## 11. Onboarding Requirements for Teams
+
+Each team must provide:
+
+* S3 bucket details
+* Access role for platform
+* Agreement to standard path structure
+* Confirmation of data format version
+
+---
+
+## 12. ADK Dependency Strategy
+
+* ADK is used only for:
+
+  * agent execution
+  * event generation
+* ADK persistence (DatabaseSessionService) is not used
+* Platform does not depend on ADK database schema
+
+---
+
+## 13. Benefits
+
+* Compliance-aligned (no business data in platform)
+* Scalable across multiple teams and agents
+* Reduced database footprint
+* Clear separation of responsibilities
+* Flexibility to evolve platform independently of ADK
+
+---
+
+## 14. Risks and Mitigations
+
+| Risk                         | Mitigation                |
+| ---------------------------- | ------------------------- |
+| Inconsistent S3 formats      | Enforce standard contract |
+| S3 access issues             | Onboarding validation     |
+| Large payload latency        | Fetch on-demand only      |
+| Tight coupling to ADK format | Versioned storage format  |
+
+---
+
+## 15. Conclusion
+
+The proposed architecture establishes a clear separation:
+
+| Layer           | Responsibility              |
+| --------------- | --------------------------- |
+| ADK             | Execution engine            |
+| PostgreSQL      | Metadata and orchestration  |
+| S3 (team-owned) | Full session and event data |
+
+This approach ensures compliance, scalability, and platform independence while enabling teams to retain ownership of their data.
