@@ -871,3 +871,158 @@ You are responsible for analyzing and resolving payment-related cases.
 - If data is missing, explicitly mention it
 
 One more questions there will be many mcp tools. There could be possibility that the team who defines the agent, they might have their own mcp tools in that case how can platform tests the mcp tools what strategy could be their to test the mcp tools owned by other teams
+
+
+
+Use YAML like this:
+
+agent:
+  name: payment-investigation-agent
+
+  model: gemini-2.0-flash
+
+  tools:
+    - refund_payment
+    - close_case
+
+  code_config:
+    before_tool_callbacks:
+      - hitl_before_tool_callback
+
+  metadata:
+
+    hitl_config:
+
+      refund_payment:
+        enabled: true
+        approval_type: FINANCIAL
+        risk_level: HIGH
+
+      close_case:
+        enabled: false
+
+This is MUCH cleaner for shared-runtime environments.
+
+Why this is the correct approach
+
+Because:
+
+metadata is portable
+metadata survives serialization/deserialization
+metadata is runtime-agnostic
+metadata is future-safe
+metadata does not require runtime customization
+
+Most enterprise platforms use this exact pattern.
+
+Then your callback accesses metadata from:
+
+agent metadata
+invocation context
+external config lookup
+
+instead of relying on custom runtime classes.
+
+Recommended enterprise pattern
+YAML Config
+    ↓
+Standard ADK Runtime
+    ↓
+Agent Metadata
+    ↓
+Callbacks read metadata
+    ↓
+External HITL orchestration
+
+This avoids tight coupling with:
+
+runtime internals
+deployment team implementation
+custom deserialization logic
+How callback should work
+
+Your callback should ideally do:
+
+async def hitl_before_tool_callback(
+    tool,
+    args,
+    tool_context,
+):
+
+    metadata = tool_context.agent.metadata or {}
+
+    hitl_config = metadata.get("hitl_config", {})
+
+    tool_policy = hitl_config.get(tool.name)
+
+    if tool_policy and tool_policy.get("enabled"):
+
+        # create HITL event
+        # persist externally
+        # block execution
+
+        return {
+            "status": "PENDING_APPROVAL"
+        }
+
+    return None
+
+This is runtime-safe because:
+
+metadata is generic
+no subclassing required
+no custom runtime dependency
+works across deployment boundaries
+This is the key architectural insight
+
+Since another team owns runtime/deployment:
+
+You should treat ADK runtime as:
+
+a shared execution platform
+
+NOT:
+
+an extensible application framework
+
+Therefore:
+
+use officially supported extension points
+avoid runtime customization
+keep governance data declarative
+externalize orchestration
+
+This is exactly the right enterprise mindset.
+
+What you SHOULD own
+
+Your team should own:
+
+YAML schema conventions
+metadata structure
+callback logic
+HITL orchestration
+workflow execution
+approval persistence
+
+The runtime team owns:
+
+agent hosting
+deployment
+execution infrastructure
+ADK lifecycle management
+
+This separation scales much better organizationally.
+
+Recommended final architecture
+Shared ADK Runtime
+    ↓
+Standard Agent YAML
+    ↓
+Metadata-based HITL Policies
+    ↓
+Callback Interception
+    ↓
+External Workflow/HITL Engine
+
+This is likely the cleanest model for your organization setup.
