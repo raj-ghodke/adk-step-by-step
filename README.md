@@ -1026,3 +1026,191 @@ Callback Interception
 External Workflow/HITL Engine
 
 This is likely the cleanest model for your organization setup.
+
+
+----------------------------------------------------------------------------------------------------------------------------------
+We need to update the existing Agent Onboarding and Invoke flow to support storing and loading raw YAML agent configs instead of JSON configs.
+
+## Current Flow
+
+* Onboarding endpoint accepts agent config JSON
+* JSON config is persisted in PostgreSQL
+* Invoke endpoint reads JSON config
+* Invoke endpoint parses JSON
+* ToolResolver resolves tools
+* Agent object is manually constructed
+
+## New Requirement
+
+We want to make the onboarding fully YAML-driven using Google ADK native YAML support.
+
+Reference ADK API:
+
+```python
+from google.adk.agents import config_agent_utils
+
+agent = config_agent_utils.from_config("root_agent.yaml")
+```
+
+# Expected Changes
+
+1. Onboarding Endpoint Changes
+
+---
+
+Current Behavior:
+
+* Accepts JSON config payload
+* Stores JSON in DB
+
+New Behavior:
+
+* Accept raw YAML string as request payload
+* Preserve YAML exactly as received:
+
+  * indentation
+  * comments
+  * formatting
+  * ordering
+
+Do NOT:
+
+* parse YAML
+* convert YAML to JSON
+* reserialize YAML
+
+Store YAML exactly as-is in PostgreSQL.
+
+## Database Changes:
+
+Current column:
+
+* config_json
+
+Replace with:
+
+* yaml_config TEXT
+
+## Migration:
+
+* Add new `yaml_config` TEXT column
+* Existing JSON configs can remain untouched for backward compatibility if needed
+
+Example request payload:
+
+```yaml
+name: internet_agent
+model: gemini-2.5-flash
+
+generate_content_config:
+  temperature: 0.0
+
+tools:
+  - name: MCPToolset
+    args:
+      stdio_connection_params:
+        server_params:
+          command: markitdown-mcp
+        timeout: 10
+```
+
+2. Invoke Endpoint Changes
+
+---
+
+Current Behavior:
+
+* Read JSON config from DB
+* Parse JSON
+* Resolve tools manually
+* Build agent manually
+
+Remove:
+
+* manual JSON parsing
+* manual tool resolution
+* manual agent construction
+
+## New Behavior:
+
+Read YAML config from DB and directly construct the agent using ADK native YAML loader.
+
+Implementation:
+
+```python
+import tempfile
+from google.adk.agents import config_agent_utils
+
+yaml_string = db_record["yaml_config"]
+
+with tempfile.NamedTemporaryFile(
+    mode="w",
+    suffix=".yaml",
+    delete=False
+) as temp_file:
+
+    temp_file.write(yaml_string)
+    temp_yaml_path = temp_file.name
+
+agent = config_agent_utils.from_config(temp_yaml_path)
+```
+
+# Important Requirements
+
+1. Preserve YAML formatting exactly as received
+2. Do not convert YAML to JSON anywhere
+3. Remove old manual ToolResolver logic for YAML-based agents
+4. Use ADK native YAML loading as source of truth
+5. Ensure temporary YAML files are cleaned up after loading if needed
+6. Maintain backward compatibility if existing JSON agents still exist
+7. Add logging for:
+
+   * YAML config loading
+   * temp file creation
+   * agent creation success/failure
+
+# Suggested DB Schema
+
+PostgreSQL:
+
+```sql
+ALTER TABLE agent_configs
+ADD COLUMN yaml_config TEXT;
+```
+
+# Example Flow
+
+Onboarding:
+
+```text
+Client sends YAML
+    ↓
+Store raw YAML string in PostgreSQL TEXT column
+```
+
+Invoke:
+
+```text
+Read YAML from DB
+    ↓
+Write YAML to temp file
+    ↓
+config_agent_utils.from_config(temp_yaml_path)
+    ↓
+Agent constructed by ADK
+```
+
+# Deliverables
+
+1. Updated onboarding endpoint
+2. Updated DB persistence layer
+3. Updated invoke endpoint
+4. Removal/refactor of old manual ToolResolver flow
+5. Migration script for PostgreSQL
+6. Unit tests for:
+
+   * YAML persistence
+   * YAML retrieval
+   * Agent creation from YAML
+   * Backward compatibility
+7. Proper cleanup/error handling around temp files
