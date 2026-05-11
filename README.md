@@ -1214,3 +1214,27 @@ Agent constructed by ADK
    * Agent creation from YAML
    * Backward compatibility
 7. Proper cleanup/error handling around temp files
+
+before_tool_callbacks:
+
+  - name: my_callbacks.hitl_before_tool_callback
+
+    args:
+
+      - name: hitl_config
+        value:
+
+          default:
+            enabled: false
+
+          tools:
+
+            refund_payment:
+              enabled: true
+              approval_type: FINANCIAL
+              risk_level: HIGH
+
+            reverse_transaction:
+              enabled: true
+              approval_type: TREASURY
+              risk_level: CRITICAL
